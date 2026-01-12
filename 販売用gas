@@ -915,9 +915,9 @@ function updateDashboard() {
   const maxLines = Math.max(leftRows.length, rightRows.length);
   const startRow = 3;
   
-  // チェックボックス常設化 (A3)
-  const a3Val = dashboardSheet.getRange('A3').getDataValidation();
-  if (!a3Val) {
+  // チェックボックス常設化 (A5をチェック)
+  const a5Val = dashboardSheet.getRange('A5').getDataValidation();
+  if (!a5Val) {
       dashboardSheet.getRange(startRow, 1, 1000, 1).insertCheckboxes();
       dashboardSheet.getRange(startRow, 12, 1000, 1).insertCheckboxes(); // L列 (12)
   }
@@ -999,7 +999,11 @@ function updateDashboard() {
     if (boldRows.length) {
       const ranges = dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}:G${startRow+i}`));
       ranges.setFontWeight('bold').setBackground('#EEEEEE');
+      // A列のチェックボックス削除 (見出し行)
+      dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}`)).removeCheckboxes();
     }
+    // 右側見出し(L3)のチェックボックス削除
+    dashboardSheet.getRange(startRow, 12).removeCheckboxes();
     dashboardSheet.getRange(`H${startRow}:J${startRow}`).setFontWeight('bold'); 
     dashboardSheet.getRange(`T${startRow}:V${startRow}`).setFontWeight('bold'); 
 
