@@ -915,21 +915,37 @@ function updateDashboard() {
   const maxLines = Math.max(leftRows.length, rightRows.length);
   const startRow = 3;
   
-  // チェックボックス常設化 (A5をチェック)
-  const a5Val = dashboardSheet.getRange('A5').getDataValidation();
-  if (!a5Val) {
-      dashboardSheet.getRange(startRow, 1, 1000, 1).insertCheckboxes();
-      dashboardSheet.getRange(startRow, 12, 1000, 1).insertCheckboxes(); // L列 (12)
+  // Checkbox insertion: Checkboxes are always reset for the active range to ensure former headers get checkboxes back
+  // A列 (左側)
+  if (maxLines > 0) {
+    dashboardSheet.getRange(startRow, 1, maxLines, 1).insertCheckboxes();
+    // L列 (右側)
+    dashboardSheet.getRange(startRow, 12, maxLines, 1).insertCheckboxes();
   }
+
+  // Remove checkboxes from headers BEFORE setting values (to avoid validation errors, though setValues might bypass)
+  if (boldRows.length) {
+    dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}`)).removeCheckboxes();
+  }
+  // Remove right side header checkbox (L3)
+  dashboardSheet.getRange(startRow, 12).removeCheckboxes();
 
   const currentMax = dashboardSheet.getLastRow();
   const clearHeight = Math.max(currentMax - startRow + 1, maxLines); 
   
   if (clearHeight > 0) {
-    dashboardSheet.getRange(startRow, 1, clearHeight, 1).clearContent(); // A (Check)
-    dashboardSheet.getRange(startRow, 12, clearHeight, 1).clearContent(); // L (Check)
-    dashboardSheet.getRange(startRow, 2, clearHeight, 10).clearContent().clearDataValidations().clearFormat();
-    dashboardSheet.getRange(startRow, 13, clearHeight, 10).clearContent().clearDataValidations().clearFormat();
+    // Clear content of A and L for the whole range first (to avoid mixed states)
+    // But actually, we just inserted checkboxes. 
+    // We only need to clear "excess" rows below maxLines.
+    if (clearHeight > maxLines) {
+       dashboardSheet.getRange(startRow + maxLines, 1, clearHeight - maxLines, 1).clearContent().removeCheckboxes();
+       dashboardSheet.getRange(startRow + maxLines, 12, clearHeight - maxLines, 1).clearContent().removeCheckboxes();
+       dashboardSheet.getRange(startRow + maxLines, 2, clearHeight - maxLines, 10).clearContent().clearDataValidations().clearFormat();
+       dashboardSheet.getRange(startRow + maxLines, 13, clearHeight - maxLines, 10).clearContent().clearDataValidations().clearFormat();
+    }
+    // For the active range (maxLines), we overwrite with setValues, so no need to clear content explicitly except B-K, M-V columns
+    dashboardSheet.getRange(startRow, 2, maxLines, 10).clearContent().clearDataValidations().clearFormat();
+    dashboardSheet.getRange(startRow, 13, maxLines, 10).clearContent().clearDataValidations().clearFormat();
   }
 
   const finalValues = [];
@@ -947,7 +963,7 @@ function updateDashboard() {
     const range = dashboardSheet.getRange(startRow, 1, finalValues.length, 22);
     range.setValues(finalValues);
 
-    // ヘッダー書き戻し
+    // Header Rewrite
     dashboardSheet.getRange('B2').setValue('プロジェクト名');
     dashboardSheet.getRange('C2').setValue('タスク名');
     dashboardSheet.getRange('D2').setValue('開始日時');
@@ -999,11 +1015,7 @@ function updateDashboard() {
     if (boldRows.length) {
       const ranges = dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}:G${startRow+i}`));
       ranges.setFontWeight('bold').setBackground('#EEEEEE');
-      // A列のチェックボックス削除 (見出し行)
-      dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}`)).removeCheckboxes();
     }
-    // 右側見出し(L3)のチェックボックス削除
-    dashboardSheet.getRange(startRow, 12).removeCheckboxes();
     dashboardSheet.getRange(`H${startRow}:J${startRow}`).setFontWeight('bold'); 
     dashboardSheet.getRange(`T${startRow}:V${startRow}`).setFontWeight('bold'); 
 
