@@ -129,6 +129,7 @@ function onOpen() {
     .addItem('手動: 【統合】同期・転送・並び替え (タスク入力)', 'executeTasksAction')
     .addItem('手動: タスク一覧更新 (統合版)', 'updateDashboardWithCalendarSync')
     .addSeparator()
+    .addItem('🔧 レイアウト修復 (チェックボックス再設置)', 'repairCheckboxes')
     .addItem('手動: タスク集計・分析', 'aggregateAndVisualize')
     .addToUi();
 }
@@ -166,7 +167,10 @@ function setupTriggers() {
     .everyDays(1)
     .create();
 
-  Browser.msgBox('設定完了！\\n・カレンダー同期: 15分ごと\\n・タスク一覧更新: 1時間ごと\\n・タスク転記: 毎日3時\\nに設定しました。');
+  // 5. レイアウト修復
+  repairCheckboxes();
+
+  Browser.msgBox('設定完了！\n・カレンダー同期: 15分ごと\n・タスク一覧更新: 1時間ごと\n・タスク転記: 毎日3時\n・レイアウト修復も実行しました。');
 }
 
 /**
@@ -1952,4 +1956,51 @@ function aggregateAndVisualize() {
     }
 
     ss.toast(`集計完了: ${filteredData.length}件`, '完了');
+}
+
+/**
+ * スプレッドシートをコピーした際に壊れやすいチェックボックスやプルダウンを修復する
+ */
+function repairCheckboxes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  
+  try {
+    // 1. タスク入力シート
+    const taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
+    if (taskSheet) {
+      taskSheet.getRange('A3').insertCheckboxes();
+      const lastRow = taskSheet.getMaxRows();
+      if (lastRow >= 5) {
+        taskSheet.getRange(5, 1, lastRow - 4, 1).insertCheckboxes();
+      }
+    }
+
+    // 2. タスク一覧シート
+    const dashboardSheet = ss.getSheetByName(RECENT_TASK_SHEET_NAME);
+    if (dashboardSheet) {
+      dashboardSheet.getRange(DASHBOARD_INTEGRATED_CHECKBOX_CELL).insertCheckboxes();
+    }
+
+    // 3. 設定シート
+    const settingSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+    if (settingSheet) {
+      settingSheet.getRange('A2:A3').insertCheckboxes();
+    }
+
+    // 4. プロジェクトテンプレートシート
+    const templateSheet = ss.getSheetByName(TEMPLATE_SHEET_NAME);
+    if (templateSheet) {
+      templateSheet.getRange(PROJECT_SYNC_SORT_CELL).insertCheckboxes(); // A27
+      const lastRow = templateSheet.getMaxRows();
+      if (lastRow >= 29) {
+        templateSheet.getRange(29, 1, lastRow - 28, 1).insertCheckboxes();
+      }
+    }
+
+    ss.toast('チェックボックスの修復が完了しました', '完了');
+  } catch (e) {
+    console.error(e);
+    ui.alert('修復中にエラーが発生しました: ' + e.message);
+  }
 }

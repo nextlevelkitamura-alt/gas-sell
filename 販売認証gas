@@ -51,6 +51,8 @@ function onOpen() {
   ui.createMenu('📅 タスク連携')
     .addItem('🔧 設定チェック (診断)', 'checkConfiguration')
     .addSeparator()
+    .addItem('🔧 レイアウト修復 (チェックボックス再設置)', 'repairCheckboxes')
+    .addSeparator()
     .addItem('設定: 自動化トリガーをセット (更新時も実行)', 'setupTriggers')
     .addSeparator()
     .addItem('手動: プロジェクトシート作成', 'createProjectSheets')
@@ -80,6 +82,10 @@ function checkConfiguration() {
 
 function setupTriggers() {
   if (isAuthorized()) LIB.setupTriggers(); else authError();
+}
+
+function repairCheckboxes() {
+  if (isAuthorized()) LIB.repairCheckboxes(); else authError();
 }
 
 // --- プロジェクト管理 ---
