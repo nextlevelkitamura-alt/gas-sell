@@ -1966,15 +1966,18 @@ function repairCheckboxes() {
   const ui = SpreadsheetApp.getUi();
   
   try {
-    // 1. タスク入力シート
-    const taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
-    if (taskSheet) {
-      taskSheet.getRange('A3').insertCheckboxes();
-      const lastRow = taskSheet.getMaxRows();
-      if (lastRow >= 5) {
-        taskSheet.getRange(5, 1, lastRow - 4, 1).insertCheckboxes();
+    // 1. タスク入力 ＆ カレンダー取込
+    const entrySheets = [TASK_SHEET_NAME, CALENDAR_INBOX_SHEET_NAME];
+    entrySheets.forEach(name => {
+      const sheet = ss.getSheetByName(name);
+      if (sheet) {
+        sheet.getRange('A3').insertCheckboxes();
+        const maxRow = sheet.getMaxRows();
+        if (maxRow >= 5) {
+          sheet.getRange(5, 1, maxRow - 4, 1).insertCheckboxes();
+        }
       }
-    }
+    });
 
     // 2. タスク一覧シート
     const dashboardSheet = ss.getSheetByName(RECENT_TASK_SHEET_NAME);
@@ -1988,15 +1991,19 @@ function repairCheckboxes() {
       settingSheet.getRange('A2:A3').insertCheckboxes();
     }
 
-    // 4. プロジェクトテンプレートシート
-    const templateSheet = ss.getSheetByName(TEMPLATE_SHEET_NAME);
-    if (templateSheet) {
-      templateSheet.getRange(PROJECT_SYNC_SORT_CELL).insertCheckboxes(); // A27
-      const lastRow = templateSheet.getMaxRows();
-      if (lastRow >= 29) {
-        templateSheet.getRange(29, 1, lastRow - 28, 1).insertCheckboxes();
+    // 4. プロジェクトシート（テンプレート ＆ 全プロジェクト）
+    const allSheets = ss.getSheets();
+    allSheets.forEach(sheet => {
+      const name = sheet.getName();
+      // 固定シート（除外リスト）以外、またはテンプレートシートであれば適用
+      if (!EXCLUDED_SHEETS.includes(name) || name === TEMPLATE_SHEET_NAME) {
+        sheet.getRange(PROJECT_SYNC_SORT_CELL).insertCheckboxes(); // A27
+        const maxRow = sheet.getMaxRows();
+        if (maxRow >= 29) {
+          sheet.getRange(29, 1, maxRow - 28, 1).insertCheckboxes();
+        }
       }
-    }
+    });
 
     ss.toast('チェックボックスの修復が完了しました', '完了');
   } catch (e) {
