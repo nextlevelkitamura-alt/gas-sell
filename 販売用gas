@@ -1,0 +1,1795 @@
+/**
+ * スプレッドシートのタスク管理＆プロジェクトシート自動作成スクリプト（完全版）
+ * * 【機能一覧】
+ * 1. プロジェクト一覧シートのA列に入力 -> 設定シート左側にテンプレートをコピーして新シート作成
+ * 2. タスク入力シート(5行目~)および各プロジェクトシート(29行目~)のC列に入力 -> ID自動生成
+ * 3. 【復活】タスク入力シートのA列(完了)をON -> 「完了タスク」シートへ移動
+ * 4. 【復活】各プロジェクトシートのA列(完了)をON -> 同シート内のアーカイブエリアへ移動
+ * 5. タスク入力シートのF3チェックボックスON -> 【統合機能】同期・転送・並び替えを一括実行
+ * 6. 個別のプロジェクトシートでE2チェックボックスON -> カレンダー同期 ＆ 並び替え
+ * 7. 「タスク一覧」シートのD1チェックボックスON -> 【統合機能】カレンダー反映後に直近タスクを集計・更新
+ * - 未設定タスク（右側）の日時入力 -> カレンダー登録
+ * - 確定タスク（左側）の変更 -> カレンダー反映
+ * - カレンダー側の変更 -> シート反映
+ * - 所要時間プルダウンの設定シート参照
+ * * * * * 【重要: 最初に必ず実行してください】
+ * メニューの「📅 タスク連携」>「設定: 自動化トリガーをセット」を実行して機能を有効化してください。
+ */
+
+
+// ==========================================
+// 【追記】認証門番システム（Webアプリ用）
+// ==========================================
+
+/**
+ * 外部からの認証リクエストを受け取る（▶実行ボタンは押しちゃダメ！）
+ */
+function doGet(e) {
+  // ★重要: エディタの「実行」ボタンを押したときの対策
+  if (!e) {
+    return ContentService.createTextOutput("【エラー】この関数は「ウェブアプリ」としてデプロイして使うものです。ここでの実行ボタンでは動作しません。");
+  }
+
+  const userEmail = e.parameter ? e.parameter.email : null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("認証リスト"); // シート名が画像と一致していること
+  
+  if (!sheet) {
+    return ContentService.createTextOutput("Error: '認証リスト' sheet not found");
+  }
+  
+  // 1行目（見出し）を飛ばし、2行目以降の「C列（3列目）」をすべて取得
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return ContentService.createTextOutput("NG");
+  
+  const authEmails = sheet.getRange(2, 3, lastRow - 1, 1).getValues().flat();
+
+  // 実際にツールを使っている人のアドレスが含まれているか判定
+  const isAllowed = authEmails.includes(userEmail);
+  return ContentService.createTextOutput(isAllowed ? "OK" : "NG");
+}
+
+/**
+ * スプレッドシートのタスク管理＆プロジェクトシート自動作成スクリプト（完全版）
+ * * 【機能一覧】
+ * 1. プロジェクト一覧シートのA列に入力 -> 設定シート左側にテンプレートをコピーして新シート作成
+ * 2. タスク入力シート(5行目~)および各プロジェクトシート(29行目~)のC列に入力 -> ID自動生成
+ * 3. 【復活】タスク入力シートのA列(完了)をON -> 「完了タスク」シートへ移動
+ * 4. 【復活】各プロジェクトシートのA列(完了)をON -> 同シート内のアーカイブエリアへ移動
+ * 5. タスク入力シートのF3チェックボックスON -> 【統合機能】同期・転送・並び替えを一括実行
+ * 6. 個別のプロジェクトシートでE2チェックボックスON -> カレンダー同期 ＆ 並び替え
+ * 7. 「タスク一覧」シートのD1チェックボックスON -> 【統合機能】カレンダー反映後に直近タスクを集計・更新
+ * - 未設定タスク（右側）の日時入力 -> カレンダー登録
+ * - 確定タスク（左側）の変更 -> カレンダー反映
+ * - カレンダー側の変更 -> シート反映
+ * - 所要時間プルダウンの設定シート参照
+ * * * * * 【重要: 最初に必ず実行してください】
+ * メニューの「📅 タスク連携」>「設定: 自動化トリガーをセット」を実行して機能を有効化してください。
+ */
+
+// --- 設定値 ---
+const PROJECT_SHEET_NAME = 'プロジェクト一覧';
+const TEMPLATE_SHEET_NAME = 'プロジェクトテンプレート';
+const TASK_SHEET_NAME = 'タスク入力';
+const SETTING_SHEET_NAME = '設定';
+const COMPLETED_SHEET_NAME = '完了タスク';
+const RECENT_TASK_SHEET_NAME = 'タスク一覧';
+const CALENDAR_INBOX_SHEET_NAME = 'カレンダー取込';
+const GAS_MANAGE_SHEET_NAME = 'gas管理';
+
+
+// タスク入力シート設定
+const TASK_START_ROW = 5;   // タスク入力シートの入力開始行
+const PROJECT_TASK_START_ROW = 29; // プロジェクトシートのタスク開始行
+ 
+const COL_TASK_NAME = 2;    // B列 (旧C列)
+const COL_START_TIME = 3;   // C列 (旧D列)
+const COL_PRIORITY = 4;     // D列 (旧E列)
+const COL_DURATION = 5;     // E列 (旧F列)
+const COL_PROJECT_NAME = 6; // F列 (旧G列)
+const COL_CAL_TYPE = 9;     // I列 (旧J列)
+const COL_EVENT_ID = 10;    // J列 (旧K列)
+const COL_TASK_ID = 11;     // K列 (旧L列)
+ 
+// エリア定義
+const TASK_AREA_LAST_COL = 12; // L列までをタスクエリアとする
+const ARCHIVE_START_ROW = 29;  // アーカイブ開始行
+const ARCHIVE_START_COL = 13;  // M列からアーカイブ
+ 
+// スマホ操作用チェックボックスの位置
+const SYNC_CHECKBOX_CELL = 'E2';        // タスク入力シート用 (F2 -> E2)
+const EXECUTE_ALL_CHECKBOX_CELL = 'A3'; // タスク入力シート用 (E3 -> A3)
+const PROJECT_SYNC_SORT_CELL = 'A27';   // プロジェクトシート用 (D2 -> A27)
+const DASHBOARD_INTEGRATED_CHECKBOX_CELL = 'D1'; // タスク一覧シート用 (変更なし)
+const CALENDAR_IMPORT_CHECKBOX_CELL = 'F1';  // タスク一覧シート用 (変更なし)
+
+// 設定シート列定義
+const SETTINGS_NAME_COL = 2;
+const SETTINGS_ID_COL = 3;
+const SETTINGS_DURATION_COL = 5; // E列: 所要時間リスト
+
+// 処理から除外するシート名リスト
+const EXCLUDED_SHEETS = [
+  PROJECT_SHEET_NAME, 
+  TEMPLATE_SHEET_NAME, 
+  TASK_SHEET_NAME, 
+  SETTING_SHEET_NAME, 
+  COMPLETED_SHEET_NAME,
+  RECENT_TASK_SHEET_NAME,
+  RECENT_TASK_SHEET_NAME,
+  CALENDAR_INBOX_SHEET_NAME,
+  GAS_MANAGE_SHEET_NAME,
+
+];
+
+
+/**
+ * メニュー追加
+ */
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('📅 タスク連携')
+    .addItem('設定: 自動化トリガーをセット (更新時も実行)', 'setupTriggers')
+    .addSeparator()
+    .addItem('手動: プロジェクトシート作成', 'createProjectSheets')
+    .addItem('手動: カレンダー同期 (タスク入力)', 'syncTasksToCalendar')
+    .addItem('手動: 【統合】同期・転送・並び替え (タスク入力)', 'executeTasksAction')
+    .addItem('手動: タスク一覧更新 (統合版)', 'updateDashboardWithCalendarSync')
+    .addToUi();
+}
+
+/**
+ * 【重要】トリガー設定用関数
+ */
+function setupTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => ScriptApp.deleteTrigger(t));
+
+  ScriptApp.newTrigger('onEditTrigger')
+    .forSpreadsheet(SpreadsheetApp.getActive())
+    .onEdit()
+    .create();
+
+  ScriptApp.newTrigger('syncTasksToCalendar')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  Browser.msgBox('設定完了！\nトリガーを更新しました。必ずこのメッセージが表示されたことを確認してください。');
+}
+
+/**
+ * 編集時に呼ばれる統合関数
+ */
+function onEditTrigger(e) {
+  if (!e) return;
+
+  const range = e.range;
+  const sheet = range.getSheet();
+  const sheetName = sheet.getName();
+  const row = range.getRow();
+  const col = range.getColumn();
+  const val = range.getValue();
+  const a1 = range.getA1Notation();
+
+  // チェックボックスの判定を緩める (TRUE, true, 1 などに対応)
+  const isChecked = (val === true || val === 'TRUE' || val === 1);
+
+  // --- タスク一覧(ダッシュボード)シートでの処理 ---
+  if (sheetName === RECENT_TASK_SHEET_NAME) {
+    // 完了チェックボックス (A列)
+    if (col === 1 && isChecked && row >= 3) {
+      completeTaskFromDashboard(sheet, row); // 高速完了処理
+      return;
+    }
+
+    if (a1 === DASHBOARD_INTEGRATED_CHECKBOX_CELL && isChecked) {
+      SpreadsheetApp.getActiveSpreadsheet().toast('双方向同期を開始します...', '処理中');
+      try {
+        ensureSheetColumns(sheet, 19);  // 列数増加に対応
+        reflectDashboardChanges(); // 変更反映
+        processUnscheduledTasks(); // 未設定タスク登録
+        syncFromCalendarToSheets(); // カレンダー反映
+        updateDashboard(); // 再集計
+      }
+      catch (err) { console.error(err); SpreadsheetApp.getActiveSpreadsheet().toast(`エラー: ${err.message}`, 'エラー'); }
+      finally { range.setValue(false); }
+      return;
+    }
+    if (a1 === CALENDAR_IMPORT_CHECKBOX_CELL && isChecked) {
+      SpreadsheetApp.getActiveSpreadsheet().toast('カレンダーの日時変更を反映中...', '処理中');
+      try { syncFromCalendarToSheets(); }
+      catch (err) { console.error(err); SpreadsheetApp.getActiveSpreadsheet().toast(`エラー: ${err.message}`, 'エラー'); }
+      finally { range.setValue(false); }
+      return;
+    }
+  }
+
+  // --- 個別プロジェクトシートでの処理 ---
+  if (!EXCLUDED_SHEETS.includes(sheetName)) {
+    // 同期ボタン A27
+    if (a1 === 'A27' && isChecked) {
+      SpreadsheetApp.getActiveSpreadsheet().toast('カレンダー同期と並び替えを実行中...', '処理中');
+      try { syncAndSortProjectSheet(sheet); } 
+      catch (err) { console.error(err); SpreadsheetApp.getActiveSpreadsheet().toast(`エラー: ${err.message}`, 'エラー'); } 
+      finally { range.setValue(false); }
+      return;
+    }
+    // 完了チェック (A列) -> アーカイブ移動
+    if (col === 1 && isChecked && row >= PROJECT_TASK_START_ROW) {
+      archiveCompletedTask(sheet, row);
+      return;
+    }
+    // ID自動生成 (C列)
+    if (col === COL_TASK_NAME && val && row >= PROJECT_TASK_START_ROW) {
+      const idCell = sheet.getRange(row, COL_TASK_ID);
+      if (!idCell.getValue()) idCell.setValue(Utilities.getUuid().split('-')[0]);
+    }
+    return;
+  }
+
+  // --- タスク入力シートでの処理 ---
+  if (sheetName === TASK_SHEET_NAME) {
+    // 完了チェック (A列) -> 完了タスクシートへ移動
+    if (col === 1 && isChecked && row >= TASK_START_ROW) {
+      moveTaskToCompletedSheet(sheet, row);
+      return;
+    }
+    // 単体同期
+    if (a1 === SYNC_CHECKBOX_CELL && isChecked) {
+      SpreadsheetApp.getActiveSpreadsheet().toast('カレンダー同期を開始します...', '処理中');
+      try { syncTasksToCalendar(); } finally { range.setValue(false); }
+      return;
+    }
+    // A3: 【統合機能】同期・転送・並び替え
+    if (a1 === 'A3' && isChecked) {
+      SpreadsheetApp.getActiveSpreadsheet().toast('全処理を一括実行中...\n(同期・転送・並び替え)', '処理中');
+      try { executeTasksAction(); } 
+      catch (err) { console.error(err); SpreadsheetApp.getActiveSpreadsheet().toast(`エラー: ${err.message}`, 'エラー'); }
+      finally { range.setValue(false); }
+      return;
+    }
+    // ID生成
+    if (col === COL_TASK_NAME && val && row >= TASK_START_ROW) {
+      const idCell = sheet.getRange(row, COL_TASK_ID);
+      if (!idCell.getValue()) idCell.setValue(Utilities.getUuid().split('-')[0]);
+    }
+  }
+
+  // --- プロジェクト一覧シートでの処理 ---
+  if (sheetName === PROJECT_SHEET_NAME && col === 1 && row >= 2 && val) {
+    const projectName = String(val).trim();
+    if (projectName && !SpreadsheetApp.getActiveSpreadsheet().getSheetByName(projectName)) {
+      createNewSheet(projectName);
+    }
+  }
+
+  // --- 設定シートでの処理 (カレンダー取込) ---
+  if (sheetName === SETTING_SHEET_NAME) {
+    // A列チェック -> カレンダー取込実行 (行ごとに判定)
+    if (col === 1 && isChecked && row >= 2) {
+      SpreadsheetApp.getActiveSpreadsheet().toast('カレンダー取込を開始します...', '処理中');
+      try { importCalendarToInbox(sheet, row); }
+      catch (err) { console.error(err); SpreadsheetApp.getActiveSpreadsheet().toast(`エラー: ${err.message}`, 'エラー'); }
+      finally { range.setValue(false); }
+      return;
+    }
+  }
+
+  // --- カレンダー取込シートでの処理 (振り分け実行) ---
+  if (sheetName === CALENDAR_INBOX_SHEET_NAME) {
+     // A3: 振り分け開始 (ユーザー要望によりA3に変更)
+     if (a1 === 'A3' && isChecked) {
+       SpreadsheetApp.getActiveSpreadsheet().toast('タスクの振り分け・転送を開始します...', '処理中');
+       try { distributeInboxTasks(); }
+       catch (err) { console.error(err); SpreadsheetApp.getActiveSpreadsheet().toast(`エラー: ${err.message}`, 'エラー'); }
+       finally { range.setValue(false); }
+       return;
+     }
+  }
+}
+
+/**
+ * 手動実行用ラッパー関数
+ */
+function updateDashboardWithCalendarSync() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(RECENT_TASK_SHEET_NAME);
+  if (!sheet) return;
+  
+  sheet.getRange(DASHBOARD_INTEGRATED_CHECKBOX_CELL).setValue(true);
+  ss.toast('全シートのカレンダー同期・集計を開始します...', '処理中');
+  try {
+    ensureSheetColumns(sheet, 18);
+    reflectDashboardChanges();
+    processUnscheduledTasks();
+    syncFromCalendarToSheets();
+    updateDashboard();
+  }
+  catch (err) { console.error(err); ss.toast(`エラー: ${err.message}`, 'エラー'); }
+  finally { sheet.getRange(DASHBOARD_INTEGRATED_CHECKBOX_CELL).setValue(false); }
+}
+
+/**
+ * ヘルパー関数: 指定した列数になるようにシートを拡張する
+ */
+function ensureSheetColumns(sheet, requiredCols) {
+  const currentCols = sheet.getMaxColumns();
+  if (currentCols < requiredCols) {
+    sheet.insertColumnsAfter(currentCols, requiredCols - currentCols);
+  }
+}
+
+/**
+ * 【新規】右側(未定)リストで日時が入力されたタスクをカレンダー登録し、元シートへ反映
+ */
+function processUnscheduledTasks() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dashboardSheet = ss.getSheetByName(RECENT_TASK_SHEET_NAME);
+  if (!dashboardSheet) return;
+
+  const lastRow = dashboardSheet.getLastRow();
+  if (lastRow < 3) return;
+
+  ensureSheetColumns(dashboardSheet, 18);
+
+  // Fetch K(11) ~ T(20) -> 10 columns
+  const range = dashboardSheet.getRange(3, 11, lastRow - 2, 10);
+  const values = range.getValues();
+  
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  const calendarMap = getCalendarMap(settingsSheet);
+  
+  let registeredCount = 0;
+
+  values.forEach(row => {
+    // Indices relative to K (0):
+    // 0: Check(K)
+    // 1: Proj(L)
+    // 2: Task(M)
+    // 3: Start(N)
+    // 4: Dur(O)
+    // 5: Prio(P)
+    // 6: Cal(Q)
+    // 7: TID(R)
+    // 8: Origin(S)
+    // 9: EID(T)
+
+    const taskName = row[2];
+    const startTime = row[3];
+    const duration = row[4];
+    const priority = row[5];
+    const calType = row[6]; 
+    const taskId = row[7];  
+    const sheetName = row[8]; 
+    const currentEventId = row[9]; 
+
+    if (!currentEventId && taskName && taskId && sheetName && calType && startTime instanceof Date && !isNaN(startTime)) {
+      
+      const targetSheet = ss.getSheetByName(sheetName);
+      if (!targetSheet) return;
+
+      const startRow = (sheetName === TASK_SHEET_NAME) ? TASK_START_ROW : PROJECT_TASK_START_ROW;
+      const targetLastRow = targetSheet.getLastRow();
+      if (targetLastRow < startRow) return;
+
+      const idRange = targetSheet.getRange(startRow, COL_TASK_ID, targetLastRow - startRow + 1, 1);
+      const idValues = idRange.getValues();
+      const targetIndex = idValues.findIndex(r => String(r[0]) === String(taskId));
+
+      if (targetIndex !== -1) {
+        const rowNum = startRow + targetIndex;
+        
+        if (calendarMap[calType]) {
+          try {
+            const cal = CalendarApp.getCalendarById(calendarMap[calType]);
+            if (cal) {
+              const start = new Date(startTime);
+              const end = new Date(start);
+              end.setMinutes(end.getMinutes() + (Number(duration) || 30));
+              
+              const event = cal.createEvent(taskName, start, end, {
+                description: `タスクID: ${taskId}\nシート連携`
+              });
+              event.addPopupReminder(0);
+              
+              targetSheet.getRange(rowNum, COL_START_TIME).setValue(start);
+              targetSheet.getRange(rowNum, COL_DURATION).setValue(Number(duration) || 30);
+              if (priority) targetSheet.getRange(rowNum, COL_PRIORITY).setValue(priority);
+              targetSheet.getRange(rowNum, COL_CAL_TYPE).setValue(calType);
+              targetSheet.getRange(rowNum, COL_EVENT_ID).setValue(event.getId());
+              
+              registeredCount++;
+            }
+          } catch (e) {
+            console.warn(`Calendar reg failed: ${taskName}`, e);
+          }
+        }
+      }
+    }
+  });
+
+  if (registeredCount > 0) {
+    ss.toast(`${registeredCount}件をカレンダーに登録しました`, '完了');
+  }
+}
+
+/**
+ * 左側(確定)リストの変更を元シートとカレンダーに反映
+ */
+function reflectDashboardChanges() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dashboardSheet = ss.getSheetByName(RECENT_TASK_SHEET_NAME);
+  if (!dashboardSheet) return;
+
+  const lastRow = dashboardSheet.getLastRow();
+  if (lastRow < 3) return;
+
+  const range = dashboardSheet.getRange(3, 1, lastRow - 2, 9); // A-I (9列)を取得
+  const values = range.getValues();
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  const calendarMap = getCalendarMap(settingsSheet); 
+
+  const changesBySheet = {};
+
+  values.forEach((row, i) => {
+    // 必須: TaskID (Index 6 / G列) と SheetName (Index 7 / H列)
+    if (!row[6] || !row[7]) return; 
+
+    const sheetName = row[7];
+    if (!changesBySheet[sheetName]) changesBySheet[sheetName] = [];
+    
+    changesBySheet[sheetName].push({
+      dashboardRowIndex: i, 
+      taskName: row[2],     // C: TaskName
+      startTime: row[3],    // D: StartTime
+      duration: row[4],     // E: Duration
+      priority: row[5],     // F: Priority
+      taskId: row[6],       // G: TaskID
+      eventId: row[8]       // I: EventID
+    });
+  });
+
+  let updateCount = 0;
+
+  for (const [sheetName, items] of Object.entries(changesBySheet)) {
+    const targetSheet = ss.getSheetByName(sheetName);
+    if (!targetSheet) continue;
+
+    const targetLastRow = targetSheet.getLastRow();
+    const startRow = (sheetName === TASK_SHEET_NAME) ? TASK_START_ROW : PROJECT_TASK_START_ROW;
+    
+    if (targetLastRow < startRow) continue;
+
+    const targetRange = targetSheet.getRange(startRow, 1, targetLastRow - startRow + 1, COL_TASK_ID);
+    const targetValues = targetRange.getValues();
+    let sheetModified = false;
+
+    items.forEach(item => {
+      const targetIndex = targetValues.findIndex(r => String(r[COL_TASK_ID - 1]) === String(item.taskId));
+
+      if (targetIndex !== -1) {
+        const targetRowData = targetValues[targetIndex];
+        let isChanged = false;
+        
+        const targetStart = targetRowData[COL_START_TIME - 1];
+        let newStart = item.startTime;
+        
+        if (newStart && !(newStart instanceof Date)) newStart = new Date(newStart);
+
+        if (newStart instanceof Date && !isNaN(newStart)) {
+           if (!(targetStart instanceof Date) || Math.abs(targetStart.getTime() - newStart.getTime()) > 1000) {
+             isChanged = true;
+             targetRowData[COL_START_TIME - 1] = newStart;
+           }
+        }
+
+        if (Number(targetRowData[COL_DURATION - 1]) != Number(item.duration)) {
+          isChanged = true;
+          targetRowData[COL_DURATION - 1] = item.duration;
+        }
+
+        if (targetRowData[COL_PRIORITY - 1] != item.priority) {
+          isChanged = true;
+          targetRowData[COL_PRIORITY - 1] = item.priority;
+        }
+
+        if (isChanged) {
+          sheetModified = true;
+          updateCount++;
+
+          if (item.eventId && newStart instanceof Date) {
+            const calType = targetRowData[COL_CAL_TYPE - 1];
+            const calId = calendarMap[calType];
+            
+            if (calId) {
+              try {
+                const cal = CalendarApp.getCalendarById(calId);
+                const event = cal.getEventById(item.eventId);
+                if (event) {
+                  const end = new Date(newStart);
+                  end.setMinutes(end.getMinutes() + (Number(item.duration) || 30));
+                  event.setTime(newStart, end);
+                }
+              } catch (e) {
+                console.warn(`Calendar update failed: ${item.eventId}`, e);
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (sheetModified) {
+      targetRange.setValues(targetValues);
+    }
+  }
+
+  if (updateCount > 0) {
+    ss.toast(`${updateCount}件の変更を反映しました`, '完了');
+  }
+}
+
+/**
+ * 【新機能】カレンダーから日時情報を全シートへ反映
+ */
+function syncFromCalendarToSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  
+  const calendarMap = getCalendarMap(settingsSheet);
+  const calendarIds = Object.values(calendarMap);
+  if (calendarIds.length === 0) return;
+
+  const startTime = new Date();
+  startTime.setDate(startTime.getDate() - 7); 
+  startTime.setHours(0, 0, 0, 0);
+  
+  const endTime = new Date();
+  endTime.setMonth(endTime.getMonth() + 2); 
+
+  const eventMap = new Map();
+
+  calendarIds.forEach(calId => {
+    try {
+      const cal = CalendarApp.getCalendarById(calId);
+      if (cal) {
+        const events = cal.getEvents(startTime, endTime);
+        events.forEach(evt => {
+          const evtId = evt.getId();
+          const start = evt.getStartTime();
+          const end = evt.getEndTime();
+          const duration = Math.round((end.getTime() - start.getTime()) / (1000 * 60));
+          eventMap.set(evtId, { start: start, duration: duration });
+        });
+      }
+    } catch (e) {
+      console.warn(`Calendar access error: ${calId}`, e);
+    }
+  });
+
+  if (eventMap.size === 0) return;
+
+  let updatedCount = 0;
+  
+  const targetSheets = [];
+  const taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
+  if (taskSheet) targetSheets.push({ sheet: taskSheet, startRow: TASK_START_ROW });
+
+  const allSheets = ss.getSheets();
+  allSheets.forEach(sheet => {
+    const sName = sheet.getName();
+    if (!EXCLUDED_SHEETS.includes(sName)) {
+      targetSheets.push({ sheet: sheet, startRow: PROJECT_TASK_START_ROW });
+    }
+  });
+
+  targetSheets.forEach(target => {
+    const sheet = target.sheet;
+    const startRow = target.startRow;
+    const lastRow = sheet.getLastRow();
+    
+    if (lastRow >= startRow) {
+      const numRows = lastRow - startRow + 1;
+      const range = sheet.getRange(startRow, 1, numRows, TASK_AREA_LAST_COL);
+      const values = range.getValues();
+      let sheetUpdated = false;
+
+      for (let i = 0; i < values.length; i++) {
+        const rowData = values[i];
+        const eventId = rowData[COL_EVENT_ID - 1]; 
+
+        if (eventId && eventMap.has(eventId)) {
+          const calData = eventMap.get(eventId);
+          const currentStart = rowData[COL_START_TIME - 1];
+          const currentDuration = rowData[COL_DURATION - 1];
+
+          let isDiff = false;
+          
+          if (currentStart instanceof Date) {
+            if (Math.abs(currentStart.getTime() - calData.start.getTime()) > 1000) isDiff = true;
+          } else {
+            isDiff = true; 
+          }
+
+          if (Number(currentDuration) !== calData.duration) isDiff = true;
+
+          if (isDiff) {
+            values[i][COL_START_TIME - 1] = calData.start;
+            values[i][COL_DURATION - 1] = calData.duration;
+            updatedCount++;
+            sheetUpdated = true;
+          }
+        }
+      }
+
+      if (sheetUpdated) {
+        range.setValues(values);
+      }
+    }
+  });
+
+  if (updatedCount > 0) {
+    ss.toast(`${updatedCount}件のタスク日時をカレンダーから更新しました`, '完了');
+  }
+}
+
+/**
+ * ダッシュボード更新機能
+ */
+/**
+ * ダッシュボード更新機能 (レイアウト変更: A列にチェックボックス追加)
+ */
+function updateDashboard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dashboardSheet = ss.getSheetByName(RECENT_TASK_SHEET_NAME);
+
+  if (!dashboardSheet) {
+    ss.toast(`エラー: シート "${RECENT_TASK_SHEET_NAME}" が見つかりません。`, 'エラー');
+    return;
+  }
+
+  ensureSheetColumns(dashboardSheet, 19); // 1列増えたので18->19
+
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  const calendarMap = getCalendarMap(settingsSheet);
+  const calendarNames = Object.keys(calendarMap);
+
+  // 設定シートから所要時間リストを取得
+  let durationList = ['15', '30', '45', '60', '90', '120', '180'];
+  const settingsLastRow = settingsSheet.getLastRow();
+  if (settingsLastRow >= 2) {
+    const durationVals = settingsSheet.getRange(2, SETTINGS_DURATION_COL, settingsLastRow - 1, 1).getValues();
+    const customDurations = durationVals.flat().filter(v => v !== '').map(String);
+    if (customDurations.length > 0) {
+      durationList = customDurations;
+    }
+  }
+
+  let targetSheets = [];
+  const taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
+  if (taskSheet) targetSheets.push({ sheet: taskSheet, startRow: TASK_START_ROW, name: TASK_SHEET_NAME }); 
+
+  const allSheets = ss.getSheets();
+  allSheets.forEach(sheet => {
+    const sName = sheet.getName();
+    if (!EXCLUDED_SHEETS.includes(sName)) {
+      targetSheets.push({ sheet: sheet, startRow: PROJECT_TASK_START_ROW, name: sName });
+    }
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  
+  const dayAfterTomorrow = new Date(today);
+  dayAfterTomorrow.setDate(today.getDate() + 2);
+  
+  const threeDaysLater = new Date(today);
+  threeDaysLater.setDate(today.getDate() + 3);
+
+  let tasks = [];
+
+  targetSheets.forEach(target => {
+    const lastRow = target.sheet.getLastRow();
+    if (lastRow >= target.startRow) {
+      const numRows = lastRow - target.startRow + 1;
+      const data = target.sheet.getRange(target.startRow, 1, numRows, TASK_AREA_LAST_COL).getValues();
+
+      data.forEach(row => {
+        const isCompleted = (row[0] === true);
+        const taskName = row[COL_TASK_NAME - 1];
+
+        if (!isCompleted && taskName) {
+          let startTime = row[COL_START_TIME - 1];
+          let hasDate = false;
+
+          if (startTime) {
+             if (!(startTime instanceof Date)) {
+                const d = new Date(startTime);
+                if (!isNaN(d.getTime())) {
+                    startTime = d;
+                    hasDate = true;
+                }
+             } else if (!isNaN(startTime.getTime())) {
+                 hasDate = true;
+             }
+          }
+
+          if (hasDate) {
+            const d = new Date(startTime);
+            d.setHours(0, 0, 0, 0);
+            const checkDateVal = d.getTime();
+
+            if (checkDateVal < threeDaysLater.getTime()) {
+              tasks.push({
+                projectName: (target.name === TASK_SHEET_NAME && row[COL_PROJECT_NAME - 1]) ? row[COL_PROJECT_NAME - 1] : target.name,
+                taskName: taskName,
+                startTime: startTime,
+                checkDate: checkDateVal,
+                duration: row[COL_DURATION - 1],
+                priority: row[COL_PRIORITY - 1],
+                taskId: row[COL_TASK_ID - 1],     
+                originSheet: target.name,         
+                eventId: row[COL_EVENT_ID - 1],
+                calType: row[COL_CAL_TYPE - 1]
+              });
+            }
+          } else {
+            tasks.push({
+                type: 'unscheduled',
+                projectName: (target.name === TASK_SHEET_NAME && row[COL_PROJECT_NAME - 1]) ? row[COL_PROJECT_NAME - 1] : target.name,
+                taskName: taskName,
+                startTime: '',
+                duration: row[COL_DURATION - 1],
+                priority: row[COL_PRIORITY - 1],
+                calType: row[COL_CAL_TYPE - 1],
+                taskId: row[COL_TASK_ID - 1],
+                originSheet: target.name,
+                eventId: row[COL_EVENT_ID - 1]
+            });
+          }
+        }
+      });
+    }
+  });
+
+  const expiredTasks = [];
+  const todayTasks = [];
+  const tomorrowTasks = [];
+  const dayAfterTasks = [];
+  const unscheduledTasks = [];
+
+  tasks.forEach(t => {
+    if (t.type === 'unscheduled') {
+        unscheduledTasks.push(t);
+    } else {
+        if (t.checkDate < today.getTime()) expiredTasks.push(t);
+        else if (t.checkDate < tomorrow.getTime()) todayTasks.push(t);
+        else if (t.checkDate < dayAfterTomorrow.getTime()) tomorrowTasks.push(t);
+        else dayAfterTasks.push(t);
+    }
+  });
+
+  const priorityMap = { '緊急': 4, '高い': 3, '中': 2, '低い': 1 };
+  const sortFunc = (a, b) => {
+    if (a.checkDate !== b.checkDate) return a.checkDate - b.checkDate;
+    if (a.startTime.getTime() !== b.startTime.getTime()) {
+        return a.startTime.getTime() - b.startTime.getTime();
+    }
+    const pA = priorityMap[a.priority] || 0;
+    const pB = priorityMap[b.priority] || 0;
+    if (pA !== pB) return pB - pA;
+    return (Number(a.duration)||0) - (Number(b.duration)||0);
+  };
+
+  const unscheduledSortFunc = (a, b) => {
+    const pA = priorityMap[a.priority] || 0;
+    const pB = priorityMap[b.priority] || 0;
+    if (pA !== pB) return pB - pA;
+    return (Number(a.duration)||0) - (Number(b.duration)||0);
+  };
+
+  expiredTasks.sort(sortFunc);
+  todayTasks.sort(sortFunc);
+  tomorrowTasks.sort(sortFunc);
+  dayAfterTasks.sort(sortFunc);
+  unscheduledTasks.sort(unscheduledSortFunc);
+
+  let leftRows = [];
+  let pinkRows = [], greenRows = [], boldRows = [];
+  const formatDate = (d) => Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd(E)');
+  const emptyRow9 = ['', '', '', '', '', '', '', '', '']; // 9要素
+
+  if (expiredTasks.length > 0) {
+    leftRows.push([false, '⚠ 期限切れ・未完了', '', '', '', '', '', '', '']); // falseでチェックボックス維持
+    boldRows.push(leftRows.length - 1);
+    expiredTasks.forEach(t => {
+      // A:Check, B:Proj, C:Task, D:Start, E:Dur, F:Prio, G:TID(Hide), H:Origin(Hide), I:EID(Hide)
+      leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.taskId, t.originSheet, t.eventId]);
+      greenRows.push(leftRows.length - 1);
+    });
+    leftRows.push(emptyRow9);
+  }
+  leftRows.push([false, `■ 本日 (${formatDate(today)})`, '', '', '', '', '', '', '']);
+  boldRows.push(leftRows.length - 1);
+  if (todayTasks.length === 0) {
+    leftRows.push([false, '(予定なし)', '', '', '', '', '', '', '']);
+  } else {
+    todayTasks.forEach(t => {
+      leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.taskId, t.originSheet, t.eventId]);
+      pinkRows.push(leftRows.length - 1); 
+    });
+  }
+  leftRows.push(emptyRow9);
+  leftRows.push([false, `■ 明日 (${formatDate(tomorrow)})`, '', '', '', '', '', '', '']);
+  boldRows.push(leftRows.length - 1);
+  if (tomorrowTasks.length === 0) leftRows.push([false, '(予定なし)', '', '', '', '', '', '', '']);
+  else tomorrowTasks.forEach(t => leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.taskId, t.originSheet, t.eventId]));
+  leftRows.push(emptyRow9);
+  leftRows.push([false, `■ 明後日 (${formatDate(dayAfterTomorrow)})`, '', '', '', '', '', '', '']);
+  boldRows.push(leftRows.length - 1);
+  if (dayAfterTasks.length === 0) leftRows.push([false, '(予定なし)', '', '', '', '', '', '', '']);
+  else dayAfterTasks.forEach(t => leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.taskId, t.originSheet, t.eventId]));
+
+  // 右側: [Check, Proj, Task, Start, Dur, Prio, CalType, TID, Origin, EID] -> 10 cols?
+  // ダッシュボードデザイン: 
+  // 左: A-I (9)
+  // スペーサー: J (10)
+  // 右: K-T (10) 
+  // 右の構成: [Check, Proj, Task, Start(Empty), Dur, Prio, Cal, TID, Origin, EID]
+  let rightRows = [];
+  rightRows.push([false, '【未設定タスク】', '', '', '', '', '', '', '', '']);
+  unscheduledTasks.forEach(t => {
+    rightRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.calType, t.taskId, t.originSheet, t.eventId]);
+  });
+
+  const maxLines = Math.max(leftRows.length, rightRows.length);
+  const startRow = 3;
+  
+  // チェックボックス常設化（高速化）
+  // A3に検証ルールがなければ作成 (初回のみ)
+  const a3Val = dashboardSheet.getRange('A3').getDataValidation();
+  if (!a3Val) {
+      dashboardSheet.getRange(startRow, 1, 1000, 1).insertCheckboxes();
+      dashboardSheet.getRange(startRow, 11, 1000, 1).insertCheckboxes();
+      // もし既にデータがあれば消さないように注意だが、ここは初期化に近いのでOK
+  }
+
+  const currentMax = dashboardSheet.getLastRow();
+  const clearHeight = Math.max(currentMax - startRow + 1, maxLines); // 消す範囲確保
+  
+  if (clearHeight > 0) {
+    // A, K列はチェックボックス維持のためContentのみクリア
+    dashboardSheet.getRange(startRow, 1, clearHeight, 1).clearContent(); // A
+    dashboardSheet.getRange(startRow, 11, clearHeight, 1).clearContent(); // K
+    
+    // 他の列は全クリア (Validation含む)
+    // B-J (2-10) => 9列
+    dashboardSheet.getRange(startRow, 2, clearHeight, 9).clearContent().clearDataValidations().clearFormat();
+    // L-T (12-20) => 9列
+    dashboardSheet.getRange(startRow, 12, clearHeight, 9).clearContent().clearDataValidations().clearFormat();
+  }
+
+  const finalValues = [];
+  for (let i = 0; i < maxLines; i++) {
+    const left = leftRows[i] || emptyRow9;
+    const right = rightRows[i] || [false, '', '', '', '', '', '', '', '', '']; // Right filler
+    finalValues.push([...left, '', ...right]); // Left(9) + Spacer(1) + Right(10) = 20
+  }
+
+  if (finalValues.length > 0) {
+    // 範囲書き込み: A3 ~ (maxLines行) x 20列
+    const range = dashboardSheet.getRange(startRow, 1, finalValues.length, 20);
+    range.setValues(finalValues);
+
+    // ヘッダー書き戻し(ズレ対応)
+    dashboardSheet.getRange('B2').setValue('プロジェクト名');
+    dashboardSheet.getRange('C2').setValue('タスク名');
+    dashboardSheet.getRange('D2').setValue('開始日時');
+    dashboardSheet.getRange('E2').setValue('所要時間');
+    dashboardSheet.getRange('F2').setValue('優先度');
+
+    dashboardSheet.getRange('L2').setValue('プロジェクト名');
+    dashboardSheet.getRange('M2').setValue('タスク名');
+    dashboardSheet.getRange('N2').setValue('所要時間'); // Startはスキップ
+    dashboardSheet.getRange('O2').setValue('所要時間');
+    dashboardSheet.getRange('P2').setValue('優先度');
+    dashboardSheet.getRange('Q2').setValue('カレンダー');
+
+    const priorityRule = SpreadsheetApp.newDataValidation().requireValueInList(['緊急', '高い', '中', '低い'], true).setAllowInvalid(false).build();
+    const durationRule = SpreadsheetApp.newDataValidation().requireValueInList(durationList, true).setAllowInvalid(false).build();
+    const dateRule = SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(true).build();
+    
+    let calendarRule = null;
+    if (calendarNames.length > 0) {
+        calendarRule = SpreadsheetApp.newDataValidation().requireValueInList(calendarNames, true).setAllowInvalid(false).build();
+    }
+
+    const rangeE = dashboardSheet.getRange(startRow, 5, maxLines, 1); // E: Dur (old 4+1)
+    const rangeF = dashboardSheet.getRange(startRow, 6, maxLines, 1); // F: Prio (old 5+1)
+    
+    // 右側
+    // K: Check, L: Proj, M: Task, N: Start, O: Dur, P: Prio, Q: Cal
+    const rangeO = dashboardSheet.getRange(startRow, 15, maxLines, 1); // O: Dur
+    const rangeP = dashboardSheet.getRange(startRow, 16, maxLines, 1); // P: Prio
+    const rangeQ = dashboardSheet.getRange(startRow, 17, maxLines, 1); // Q: Cal
+
+    const rangeD = dashboardSheet.getRange(startRow, 4, maxLines, 1); // D: Start
+    const rangeN = dashboardSheet.getRange(startRow, 14, maxLines, 1); // N: Start(Right)
+
+    try {
+      rangeF.setDataValidation(priorityRule);
+      rangeP.setDataValidation(priorityRule);
+      rangeE.setDataValidation(durationRule);
+      rangeO.setDataValidation(durationRule);
+      rangeD.setDataValidation(dateRule);
+      rangeN.setDataValidation(dateRule);
+      if (calendarRule) rangeQ.setDataValidation(calendarRule);
+    } catch(e) {}
+
+    // チェックボックスの再生成と削除ループ(removeCheckboxes)を廃止し高速化
+    // (ユーザー合意によりヘッダー行にもチェックボックスが表示される仕様)
+
+    dashboardSheet.clearConditionalFormatRules();
+
+    if (greenRows.length) dashboardSheet.getRangeList(greenRows.map(i => `A${startRow+i}:F${startRow+i}`)).setBackground('#F0F8F0');
+    if (pinkRows.length) dashboardSheet.getRangeList(pinkRows.map(i => `A${startRow+i}:F${startRow+i}`)).setBackground('#FFE0E0');
+    if (boldRows.length) {
+      const ranges = dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}:F${startRow+i}`));
+      ranges.setFontWeight('bold').setBackground('#EEEEEE');
+    }
+    // 非表示列エリア
+    dashboardSheet.getRange(`G${startRow}:I${startRow}`).setFontWeight('bold'); // 左隠し
+    dashboardSheet.getRange(`R${startRow}:T${startRow}`).setFontWeight('bold'); // 右隠し
+
+    dashboardSheet.getRange(startRow, 4, maxLines, 1).setNumberFormat('MM/dd HH:mm');
+    dashboardSheet.getRange(startRow, 14, maxLines, 1).setNumberFormat('MM/dd HH:mm');
+
+    // 列隠し (G=7, H=8, I=9) -> 3列
+    dashboardSheet.hideColumns(7, 3); 
+    // 右側隠し (R=18, S=19, T=20) -> 3列 (TID, Origin, EID)
+    dashboardSheet.hideColumns(18, 3);
+  }
+
+  ss.toast('タスク一覧を更新しました', '完了');
+}
+
+/**
+ * ダッシュボードからの高速完了処理
+ */
+function completeTaskFromDashboard(sheet, row) {
+  // 左側: A(1)チェック -> G(7)=TID, H(8)=Origin, I(9)=EID
+  // 右側: K(11)チェック -> R(18)=TID, S(19)=Origin, T(20)=EID
+  // どちらのチェックボックスが押されたか判定は難しいので、両方チェックする(あるいはgetActiveCellで判定)
+  
+  const activeCol = sheet.getActiveCell().getColumn();
+  let tidIndex, originIndex;
+
+  if (activeCol === 1) { // 左側
+    tidIndex = 7;
+    originIndex = 8;
+  } else if (activeCol === 11) { // 右側
+    tidIndex = 18;
+    originIndex = 19;
+  } else {
+    return; // A列でもK列でもなければ何もしない
+  }
+
+  const rowVals = sheet.getRange(row, 1, 1, 20).getValues()[0];
+  const taskId = rowVals[tidIndex - 1];
+  const originSheetName = rowVals[originIndex - 1];
+
+  // Header Check: If no Task ID, it's a header or spacer. Uncheck and return.
+  if (!taskId) {
+    sheet.getRange(row, activeCol).setValue(false);
+    return;
+  }
+
+  // 画面上から即座に消す (行削除ではなくセル削除で上に詰める)
+  try {
+    if (activeCol === 1) {
+      sheet.getRange(row, 1, 1, 9).deleteCells(SpreadsheetApp.Dimension.ROWS);
+    } else {
+      sheet.getRange(row, 11, 1, 10).deleteCells(SpreadsheetApp.Dimension.ROWS); // スペーサーJは含めない
+    }
+    SpreadsheetApp.getActiveSpreadsheet().toast('タスクを完了しました', '完了');
+  } catch (e) {
+    console.error(e);
+  }
+
+  // 裏側で本処理
+  if (taskId && originSheetName) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const originSheet = ss.getSheetByName(originSheetName);
+    if (originSheet) {
+      // IDで検索
+      const startRow = (originSheetName === TASK_SHEET_NAME) ? TASK_START_ROW : PROJECT_TASK_START_ROW;
+      const lastRow = originSheet.getLastRow();
+      if (lastRow >= startRow) {
+        const ids = originSheet.getRange(startRow, COL_TASK_ID, lastRow - startRow + 1, 1).getValues();
+        const targetIndex = ids.findIndex(r => String(r[0]) === String(taskId));
+        
+        if (targetIndex !== -1) {
+          const targetRow = startRow + targetIndex;
+          if (originSheetName === TASK_SHEET_NAME) {
+            moveTaskToCompletedSheet(originSheet, targetRow);
+          } else {
+            archiveCompletedTask(originSheet, targetRow);
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * シート作成の実処理 (Templateをコピー)
+ */
+function createNewSheet(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const templateSheet = ss.getSheetByName(TEMPLATE_SHEET_NAME);
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  
+  if (!templateSheet) {
+    ss.toast(`エラー: "${TEMPLATE_SHEET_NAME}" シートが見つかりません。`, 'エラー', 10);
+    return;
+  }
+  if (ss.getSheetByName(name)) return;
+
+  const originalActiveSheet = ss.getActiveSheet();
+
+  try {
+    const newSheet = templateSheet.copyTo(ss);
+    newSheet.setName(name);
+    newSheet.setTabColor(null); // タブ色をリセット
+    newSheet.activate();
+    
+    if (settingsSheet) {
+      const targetIndex = settingsSheet.getIndex();
+      ss.moveActiveSheet(targetIndex);
+    }
+
+    const titleCell = newSheet.getRange('A3');
+    titleCell.setValue(name);
+    titleCell.setFontSize(14);
+    titleCell.setFontWeight('bold');
+
+    originalActiveSheet.activate();
+    ss.toast(`プロジェクトシート "${name}" を作成しました`, '完了', 5);
+  } catch (err) {
+    ss.toast(`作成エラー: ${err.message}`, 'エラー', 10);
+  }
+}
+
+/**
+ * 補助関数: カレンダーIDマップ取得
+ */
+function getCalendarMap(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return {};
+  const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+  const map = {};
+  data.forEach(row => {
+    const name = row[SETTINGS_NAME_COL - 1];
+    let id = row[SETTINGS_ID_COL - 1];
+    if (id && id.includes('calendar.google.com')) {
+      const match = id.match(/src=([^&]+)/);
+      if (match) id = decodeURIComponent(match[1]);
+      else {
+        const cidMatch = id.match(/cid=([^&]+)/);
+        if (cidMatch) id = decodeURIComponent(cidMatch[1]);
+      }
+    }
+    if (name && id) map[name] = id;
+  });
+  return map;
+}
+
+// === 以下、復活した既存関数群 ===
+
+function moveTaskToCompletedSheet(sourceSheet, row) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const targetSheet = ss.getSheetByName(COMPLETED_SHEET_NAME);
+  if (!targetSheet) {
+    ss.toast(`エラー: シート "${COMPLETED_SHEET_NAME}" がありません`, 'エラー');
+    sourceSheet.getRange(row, 1).setValue(false);
+    return;
+  }
+  try {
+    const targetRow = 2;
+    targetSheet.insertRowBefore(targetRow);
+    const lastCol = sourceSheet.getLastColumn();
+    ensureSheetColumns(targetSheet, lastCol + 1);
+
+    const sourceRange = sourceSheet.getRange(row, 1, 1, lastCol);
+    sourceRange.copyTo(targetSheet.getRange(targetRow, 1));
+    targetSheet.getRange(targetRow, lastCol + 1).setValue(new Date());
+    
+    sourceSheet.deleteRow(row);
+    ss.toast('タスクを完了シートへアーカイブしました', '完了');
+  } catch (e) {
+    ss.toast(`移動エラー: ${e.message}`, 'エラー');
+  }
+}
+
+function archiveCompletedTask(sheet, row) {
+  try {
+    const sourceRange = sheet.getRange(row, 1, 1, TASK_AREA_LAST_COL);
+    const archiveRangeWidth = TASK_AREA_LAST_COL; 
+    const insertRange = sheet.getRange(ARCHIVE_START_ROW, ARCHIVE_START_COL, 1, archiveRangeWidth);
+    insertRange.insertCells(SpreadsheetApp.Dimension.ROWS);
+    
+    ensureSheetColumns(sheet, 24); // X列(24)まで確保
+    sourceRange.copyTo(sheet.getRange(ARCHIVE_START_ROW, ARCHIVE_START_COL));
+    sheet.getRange(ARCHIVE_START_ROW, 24).setValue(new Date()); // X列にタイムスタンプ
+    
+    sourceRange.deleteCells(SpreadsheetApp.Dimension.ROWS);
+    SpreadsheetApp.getActiveSpreadsheet().toast('完了タスクをアーカイブしました', '完了');
+  } catch (e) {
+    SpreadsheetApp.getActiveSpreadsheet().toast(`移動中にエラー: ${e.message}`, 'エラー');
+  }
+}
+
+function createProjectSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const pSheet = ss.getSheetByName(PROJECT_SHEET_NAME);
+  if (!pSheet) return;
+  const vals = pSheet.getRange(2, 1, pSheet.getLastRow()-1, 1).getValues();
+  vals.forEach(r => { 
+    if(r[0] && !ss.getSheetByName(String(r[0]).trim())) {
+      createNewSheet(String(r[0]).trim());
+    }
+  });
+}
+
+function syncTasksToCalendar() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  if (!taskSheet || !settingsSheet) return;
+  const calMap = getCalendarMap(settingsSheet);
+  const lastRow = taskSheet.getLastRow();
+  if (lastRow < TASK_START_ROW) return;
+
+  const range = taskSheet.getRange(TASK_START_ROW, 1, lastRow - TASK_START_ROW + 1, taskSheet.getLastColumn());
+  const vals = range.getValues();
+  const ids = [];
+
+  for (let i=0; i<vals.length; i++) {
+    const row = vals[i];
+    const [task, start, dur, type, eid, tid] = [
+      row[COL_TASK_NAME-1], row[COL_START_TIME-1], row[COL_DURATION-1],
+      row[COL_CAL_TYPE-1], row[COL_EVENT_ID-1], row[COL_TASK_ID-1]
+    ];
+    if (!eid && task && start && dur && type && tid && calMap[type]) {
+      try {
+        const cal = CalendarApp.getCalendarById(calMap[type]);
+        if (cal) {
+          const end = new Date(start);
+          end.setMinutes(end.getMinutes() + Number(dur));
+          const ev = cal.createEvent(task, start, end, { description: `タスクID: ${tid}\nProjects自動連携` });
+          ev.addPopupReminder(0);
+          ids.push([ev.getId()]);
+        } else { ids.push([eid]); }
+      } catch(e) { ids.push([eid]); }
+    } else { ids.push([eid]); }
+  }
+  if (ids.length) taskSheet.getRange(TASK_START_ROW, COL_EVENT_ID, ids.length, 1).setValues(ids);
+  ss.toast('Tasksシート同期完了', '完了');
+}
+
+function executeTasksAction() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  const calendarMap = getCalendarMap(settingsSheet);
+
+  if (!taskSheet) return;
+
+  const lastRow = taskSheet.getLastRow();
+  if (lastRow < TASK_START_ROW) {
+    ss.toast('処理対象のタスクがありません', '完了');
+    return;
+  }
+
+  const MAX_CHECK_ROWS = 60;
+  const processRows = Math.min(lastRow - TASK_START_ROW + 1, MAX_CHECK_ROWS);
+  const range = taskSheet.getRange(TASK_START_ROW, 1, processRows, TASK_AREA_LAST_COL);
+  const values = range.getValues();
+  
+  let syncCount = 0;
+  let idUpdated = false;
+
+  for (let i = 0; i < values.length; i++) {
+    const rowData = values[i];
+    if (!rowData.some(c => c !== '')) continue;
+
+    const taskName  = rowData[COL_TASK_NAME - 1];
+    const startTime = rowData[COL_START_TIME - 1];
+    const duration  = rowData[COL_DURATION - 1];
+    const calType   = rowData[COL_CAL_TYPE - 1];
+    const eventId   = rowData[COL_EVENT_ID - 1];
+    let taskId    = rowData[COL_TASK_ID - 1];
+
+    if (!taskId && taskName) {
+        taskId = Utilities.getUuid().split('-')[0];
+        values[i][COL_TASK_ID - 1] = taskId;
+        idUpdated = true;
+    }
+
+    if (!eventId && taskName && startTime && taskId) {
+      if (calType && calendarMap[calType]) {
+        try {
+          const calendar = CalendarApp.getCalendarById(calendarMap[calType]);
+          if (calendar) {
+            const startDate = new Date(startTime);
+            const endDate = new Date(startDate);
+            const dur = Number(duration) || 30;
+            endDate.setMinutes(endDate.getMinutes() + dur);
+            
+            const event = calendar.createEvent(taskName, startDate, endDate, {
+              description: `タスクID: ${taskId}\nシート連携`
+            });
+            event.addPopupReminder(0);
+            
+            values[i][COL_EVENT_ID - 1] = event.getId();
+            syncCount++;
+            idUpdated = true;
+          }
+        } catch (e) { console.error(`Sync Error: ${e.message}`); }
+      }
+    }
+  }
+
+  if (idUpdated) {
+    range.setValues(values);
+  }
+
+  let moveCount = 0;
+  
+  for (let i = values.length - 1; i >= 0; i--) {
+    const rowData = values[i];
+    if (!rowData.some(c => c !== '')) continue;
+
+    const rawProjectName = rowData[COL_PROJECT_NAME - 1];
+    const taskName = rowData[COL_TASK_NAME - 1];
+
+    if (rawProjectName && taskName) {
+      const projectName = String(rawProjectName).trim();
+      
+      if (!EXCLUDED_SHEETS.includes(projectName)) {
+        const targetSheet = ss.getSheetByName(projectName);
+        
+        if (targetSheet) {
+          try {
+            const targetRow = 29;
+            targetSheet.insertRowBefore(targetRow);
+            targetSheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
+            taskSheet.deleteRow(TASK_START_ROW + i);
+            values.splice(i, 1);
+            moveCount++;
+          } catch (e) { console.error(`Move Error: ${e.message}`); }
+        }
+      }
+    }
+  }
+
+  sortAndWriteBack(taskSheet, TASK_START_ROW, values);
+
+  let msg = `完了: `;
+  if (syncCount > 0) msg += `${syncCount}件同期, `;
+  if (moveCount > 0) msg += `${moveCount}件転送, `;
+  msg += `並び替えました`;
+  ss.toast(msg, '完了');
+}
+
+function syncAndSortProjectSheet(sheet) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const settingsSheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  const calendarMap = getCalendarMap(settingsSheet);
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < PROJECT_TASK_START_ROW) {
+    ss.toast('処理対象のタスクがありません', '完了');
+    return;
+  }
+  
+  const numRows = lastRow - PROJECT_TASK_START_ROW + 1;
+  const range = sheet.getRange(PROJECT_TASK_START_ROW, 1, numRows, TASK_AREA_LAST_COL);
+  let values = range.getValues();
+
+  // --- 高速化のためのカレンダーイベント一括取得 (前後2ヶ月程度) ---
+  const startTimeWindow = new Date();
+  startTimeWindow.setMonth(startTimeWindow.getMonth() - 2);
+  const endTimeWindow = new Date();
+  endTimeWindow.setMonth(endTimeWindow.getMonth() + 4); 
+
+  // カレンダーごとのイベントキャッシュ { calendarId: { eventId: CalendarEvent } }
+  const calendarCache = {};
+
+  let syncCount = 0;
+  let updateCount = 0;
+
+  for (let i = 0; i < values.length; i++) {
+    const rowData = values[i];
+    if (!rowData.some(c => c !== '')) continue;
+
+    const [taskName, startTime, duration, priority, unused, unused2, unused3, unused4, calType, eventId, taskId] = rowData;
+    // インデックス確認:
+    // 0: A(Check) - unused
+    // 1: B(NAME) - taskName (COL_TASK_NAME=2) -> index 1
+    // 2: C(START) - startTime (COL_START_TIME=3) -> index 2
+    // 3: D(PRI) - priority (COL_PRIORITY=4) -> index 3
+    // 4: E(DUR) - duration (COL_DURATION=5) -> index 4
+    // 5: F(PROJ) - unused
+    // 6: G - unused
+    // 7: H - unused
+    // 8: I(Type) - calType (COL_CAL_TYPE=9) -> index 8
+    // 9: J(EvID) - eventId (COL_EVENT_ID=10) -> index 9
+    // 10: K(TID) - taskId (COL_TASK_ID=11) -> index 10
+
+    // 正しいインデックスでの取得
+    const tName = rowData[COL_TASK_NAME - 1];
+    const tStart = rowData[COL_START_TIME - 1];
+    const tDur = rowData[COL_DURATION - 1];
+    const tType = rowData[COL_CAL_TYPE - 1];
+    const tEvId = rowData[COL_EVENT_ID - 1];
+    let tId = rowData[COL_TASK_ID - 1];
+
+    // ID自動生成
+    if (!tId && tName) {
+      tId = Utilities.getUuid().split('-')[0];
+      rowData[COL_TASK_ID - 1] = tId;
+    }
+
+    if (tName && tStart && tType && calendarMap[tType]) {
+      const calId = calendarMap[tType];
+      
+      try {
+        const cal = CalendarApp.getCalendarById(calId);
+        if (cal) {
+          const startDate = new Date(tStart);
+          const endDate = new Date(startDate);
+          const d = Number(tDur) || 30;
+          endDate.setMinutes(endDate.getMinutes() + d);
+
+          if (!tEvId) {
+            // --- 新規登録 ---
+            const ev = cal.createEvent(tName, startDate, endDate, { 
+              description: `タスクID: ${tId}\nシート連携` 
+            });
+            ev.addPopupReminder(0);
+            rowData[COL_EVENT_ID - 1] = ev.getId();
+            syncCount++;
+          } else {
+            // --- 更新確認 (差分更新) ---
+            // 毎回 getEventById すると遅いので、必要な場合のみ取得するか、キャッシュ利用を検討
+            // ここでは簡易的に直アクセスするが、条件判定でAPIコールを減らす
+            // (GASのCalendarApp.getEventByIdは比較的軽量だが、回数が多いと遅い。
+            //  厳密な高速化なら期間指定で全取得してMap化する手法が良いが、
+            //  まずは「変更時のみ setTime」するロジックにするだけでも十分速い)
+            
+            try {
+               // 既存イベントを取得して内容を確認
+               const ev = cal.getEventById(tEvId);
+               if (ev) {
+                 const evStart = ev.getStartTime();
+                 const evEnd = ev.getEndTime();
+                 const evNote = ev.getDescription();
+
+                 let needUpdate = false;
+
+                 // 時間のズレが1分以上あるか
+                 if (Math.abs(evStart.getTime() - startDate.getTime()) > 60000) needUpdate = true;
+                 
+                 // 終了時間のチェック
+                 if (Math.abs(evEnd.getTime() - endDate.getTime()) > 60000) needUpdate = true;
+                 
+                 // タイトルのチェック (必要であれば)
+                 // if (ev.getTitle() !== tName) { ev.setTitle(tName); updateCount++; }
+
+                 if (needUpdate) {
+                   ev.setTime(startDate, endDate);
+                   updateCount++;
+                 }
+               }
+            } catch(e) {
+               console.warn(`Event update failed: ${tEvId}`, e);
+            }
+          }
+        }
+      } catch (e) { console.error(e); }
+    }
+  }
+
+  // 並び替えと書き戻し
+  sortAndWriteBack(sheet, PROJECT_TASK_START_ROW, values);
+
+  let msg = [];
+  if (syncCount > 0) msg.push(`${syncCount}件新規登録`);
+  if (updateCount > 0) msg.push(`${updateCount}件更新`);
+  msg.push(`並び替え完了`);
+  ss.toast(msg.join(', '), '完了');
+}
+
+function sortAndWriteBack(sheet, startRow, values) {
+  const withDate = [];
+  const withoutDate = [];
+
+  for (let i = 0; i < values.length; i++) {
+    const rowData = values[i];
+    if (!rowData.some(c => c !== '')) continue;
+
+    const startTime = rowData[COL_START_TIME - 1];
+    if (startTime instanceof Date && !isNaN(startTime)) {
+      withDate.push(rowData);
+    } else {
+      withoutDate.push(rowData);
+    }
+  }
+
+  const priorityMap = { '緊急': 4, '高い': 3, '中': 2, '低い': 1 };
+  const getPriorityScore = (p) => priorityMap[p] || 0;
+
+  const sortFunc = (a, b) => {
+    const priA = getPriorityScore(a[COL_PRIORITY - 1]);
+    const priB = getPriorityScore(b[COL_PRIORITY - 1]);
+    const durA = Number(a[COL_DURATION - 1]) || 0;
+    const durB = Number(b[COL_DURATION - 1]) || 0;
+    if (priA !== priB) return priB - priA; 
+    return durA - durB;
+  };
+
+  withDate.sort((a, b) => {
+    const dateA = a[COL_START_TIME - 1].getTime();
+    const dateB = b[COL_START_TIME - 1].getTime();
+    if (dateA !== dateB) return dateA - dateB; 
+    return sortFunc(a, b);
+  });
+  withoutDate.sort(sortFunc);
+
+  const emptyRow = new Array(TASK_AREA_LAST_COL).fill('');
+  let resultValues = [];
+  if (withDate.length > 0) resultValues = resultValues.concat(withDate);
+  if (withoutDate.length > 0) resultValues = resultValues.concat(withoutDate);
+
+  const currentLastRow = sheet.getLastRow();
+  const rowsToClear = Math.max(currentLastRow - startRow + 1, values.length);
+  if (rowsToClear > 0) {
+    sheet.getRange(startRow, 1, rowsToClear, TASK_AREA_LAST_COL).clearContent();
+  }
+  
+  if (resultValues.length > 0) {
+    sheet.getRange(startRow, 1, resultValues.length, TASK_AREA_LAST_COL).setValues(resultValues);
+  }
+}
+
+/**
+ * カレンダーからInboxへ取込 (重複チェック付き)
+ */
+function importCalendarToInbox(settingsSheet, row) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let inboxSheet = ss.getSheetByName(CALENDAR_INBOX_SHEET_NAME);
+
+  // シートがなければ作成 (タスク入力シートをコピー推奨だが、簡易作成)
+  if (!inboxSheet) {
+    const templateSheet = ss.getSheetByName(TASK_SHEET_NAME); // タスク入力をテンプレに
+    if (templateSheet) {
+      inboxSheet = templateSheet.copyTo(ss).setName(CALENDAR_INBOX_SHEET_NAME);
+      // 中身クリア
+      const lastRow = inboxSheet.getLastRow();
+      if (lastRow >= TASK_START_ROW) {
+         inboxSheet.getRange(TASK_START_ROW, 1, lastRow - TASK_START_ROW + 1, inboxSheet.getLastColumn()).clearContent();
+      }
+      inboxSheet.getRange('A3').setValue(false).insertCheckbox(); // 実行ボタン (A3)
+      inboxSheet.getRange('B3').setValue('タスク振り分け');       // ラベル (B3)
+      // 他の余計なチェックボックス等は削除
+      inboxSheet.getRange('A1:B2').clearContent().removeCheckboxes();
+    } else {
+      inboxSheet = ss.insertSheet(CALENDAR_INBOX_SHEET_NAME);
+      // ヘッダー簡易作成
+      inboxSheet.getRange('A3').insertCheckbox();
+      inboxSheet.getRange('B3').setValue('タスク振り分け');
+      inboxSheet.appendRow(['', '', '', '', '', '', '', '', '', '']); // 1-3行目調整
+      inboxSheet.getRange(4, 1, 1, 10).setValues([['', 'タスク名', '開始日時', '優先度', '所要時間', 'プロジェクト名', '', '', 'CalType', 'EventID']]);
+    }
+  }
+
+  // カレンダーID取得
+  const calIdInfo = getCalendarInfoFromRow(settingsSheet, row);
+  if (!calIdInfo.id) {
+    ss.toast('有効なカレンダーIDが見つかりません', 'エラー');
+    return;
+  }
+  
+  const calName = calIdInfo.name;
+  const calId = calIdInfo.id;
+  const cal = CalendarApp.getCalendarById(calId);
+  if (!cal) {
+    ss.toast(`カレンダー取得失敗: ${calId}`, 'エラー');
+    return;
+  }
+
+  // 重複チェック用IDリスト収集
+  const existingEventIds = new Set();
+  const allSheets = ss.getSheets();
+  const targetSheetNames = [TASK_SHEET_NAME, CALENDAR_INBOX_SHEET_NAME, ...allSheets.map(s => s.getName()).filter(n => !EXCLUDED_SHEETS.includes(n))];
+  
+  targetSheetNames.forEach(sName => {
+     const s = ss.getSheetByName(sName);
+     if (!s) return;
+     const startR = (sName === TASK_SHEET_NAME || sName === CALENDAR_INBOX_SHEET_NAME) ? TASK_START_ROW : PROJECT_TASK_START_ROW;
+     const lastR = s.getLastRow();
+     if (lastR >= startR) {
+        const ids = s.getRange(startR, COL_EVENT_ID, lastR - startR + 1, 1).getValues().flat();
+        ids.forEach(id => { if(id) existingEventIds.add(String(id)); });
+     }
+  });
+
+  // イベント取得 (前後1週間? ユーザ要望は"1週間分" -> 今日から1週間とする)
+  const startTime = new Date();
+  startTime.setHours(0,0,0,0);
+  const endTime = new Date();
+  endTime.setDate(endTime.getDate() + 7);
+
+  const events = cal.getEvents(startTime, endTime);
+  const newTasks = [];
+
+  events.forEach(evt => {
+    const eid = evt.getId();
+    if (existingEventIds.has(eid)) return; // 重複スキップ
+
+    const title = evt.getTitle();
+    const start = evt.getStartTime();
+    const end = evt.getEndTime();
+    const duration = Math.round((end.getTime() - start.getTime()) / (1000 * 60));
+    
+    // [Check, TaskName, Start, Priority, Duration, ProjectName, ..., CalType, EventID]
+    // A=1, B=2, C=3, D=4, E=5, F=6, ..., I=9, J=10
+    const rowData = new Array(12).fill('');
+    rowData[COL_TASK_NAME - 1] = title;
+    rowData[COL_START_TIME - 1] = start;
+    rowData[COL_DURATION - 1] = duration;
+    rowData[COL_CAL_TYPE - 1] = calName; // 設定シートの名前
+    rowData[COL_EVENT_ID - 1] = eid;
+    // TaskIDはまだ作らない（振り分け時に生成）
+    
+    newTasks.push(rowData);
+  });
+
+  if (newTasks.length > 0) {
+    const startRow = inboxSheet.getLastRow() + 1;
+    // TASK_START_ROW以上であることを保証
+    const writeRow = Math.max(startRow, TASK_START_ROW);
+    inboxSheet.getRange(writeRow, 1, newTasks.length, newTasks[0].length).setValues(newTasks);
+    ss.toast(`${newTasks.length}件の予定を取り込みました`, '完了');
+  } else {
+    ss.toast('新規の予定はありませんでした', '完了');
+  }
+}
+
+/**
+ * Inboxタスクを振り分け
+ */
+function distributeInboxTasks() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const inboxSheet = ss.getSheetByName(CALENDAR_INBOX_SHEET_NAME);
+  if (!inboxSheet) return;
+
+  const lastRow = inboxSheet.getLastRow();
+  if (lastRow < TASK_START_ROW) {
+    ss.toast('振り分け対象がありません', '完了');
+    return;
+  }
+
+  const range = inboxSheet.getRange(TASK_START_ROW, 1, lastRow - TASK_START_ROW + 1, TASK_AREA_LAST_COL);
+  const values = range.getValues();
+  const taskInputSheet = ss.getSheetByName(TASK_SHEET_NAME);
+  
+  let moveToProjectCount = 0;
+  let moveToInputCount = 0;
+  const rowsToDelete = [];
+
+  // 下から処理して削除するため
+  for (let i = values.length - 1; i >= 0; i--) {
+    const rowData = values[i];
+    if (!rowData.some(c => c !== '')) continue; // 空行スキップ
+
+    const taskName = rowData[COL_TASK_NAME - 1];
+    if (!taskName) continue; // タスク名なしは無視
+
+    // タスクID生成 (まだなければ)
+    if (!rowData[COL_TASK_ID - 1]) {
+       rowData[COL_TASK_ID - 1] = Utilities.getUuid().split('-')[0];
+    }
+
+    const rawProjectName = rowData[COL_PROJECT_NAME - 1];
+    const projectName = String(rawProjectName || '').trim();
+    let moved = false;
+
+    // 1. プロジェクト名があり、かつ有効なシートがある場合 -> プロジェクトシートへ
+    if (projectName && !EXCLUDED_SHEETS.includes(projectName)) {
+      const targetSheet = ss.getSheetByName(projectName);
+      if (targetSheet) {
+        try {
+          const targetRow = PROJECT_TASK_START_ROW;
+          targetSheet.insertRowBefore(targetRow);
+          targetSheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
+          moved = true;
+          moveToProjectCount++;
+        } catch (e) {
+          console.warn(`Move to project failed: ${projectName}`, e);
+        }
+      }
+    }
+
+    // 2. プロジェクト名がない、またはシートが見つからない場合 -> タスク入力シートへ
+    if (!moved && taskInputSheet) {
+        try {
+          const targetRow = TASK_START_ROW;
+          taskInputSheet.insertRowBefore(targetRow);
+          taskInputSheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
+          moved = true;
+          moveToInputCount++;
+        } catch (e) {
+          console.warn(`Move to input failed`, e);
+        }
+    }
+
+    if (moved) {
+      // 削除対象としてマーク (Inboxからは消す)
+      inboxSheet.deleteRow(TASK_START_ROW + i);
+    }
+  }
+
+  // プロジェクトシート側・タスク入力シート側の並び替えを行うのが理想だが、
+  // 件数が多いと重くなるので、今回は「転送」に留める（ユーザーが各シートで更新ボタンを押せば並ぶ）
+  // もし要望があればここで sortAndWriteBack を各シートに対して呼ぶ。
+  
+  ss.toast(`${moveToProjectCount}件をプロジェクトへ、${moveToInputCount}件をタスク入力へ移動しました`, '完了');
+}
+
+/**
+ * 設定シートの指定行からカレンダー情報を取得
+ */
+function getCalendarInfoFromRow(sheet, row) {
+  const name = sheet.getRange(row, SETTINGS_NAME_COL).getValue();
+  let id = sheet.getRange(row, SETTINGS_ID_COL).getValue();
+  
+  if (id && id.includes('calendar.google.com')) {
+      const match = id.match(/src=([^&]+)/);
+      if (match) id = decodeURIComponent(match[1]);
+      else {
+        const cidMatch = id.match(/cid=([^&]+)/);
+        if (cidMatch) id = decodeURIComponent(cidMatch[1]);
+      }
+  }
+  return { name, id };
+}
+
+// ==========================================
+// 【追記】一発セットアップ機能（固定設定版）
+// ==========================================
+
+/**
+ * 画像やログから解析した「正しい位置」にチェックボックスを強制復活させる
+ */
+function fixLayout() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. 設定シート
+  const configSheet = ss.getSheetByName('設定');
+  if (configSheet) {
+    // A2:A3
+    configSheet.getRange('A2:A3').setDataValidation(
+      SpreadsheetApp.newDataValidation().requireCheckbox().build()
+    );
+  }
+
+  // 2. タスク入力シート
+  const inputSheet = ss.getSheetByName('タスク入力');
+  if (inputSheet) {
+    // A3 (FALSE処理)
+    inputSheet.getRange('A3').setDataValidation(
+      SpreadsheetApp.newDataValidation().requireCheckbox().build()
+    );
+    // A5以降 (完了チェック) - 最終行まで
+    const maxRows = inputSheet.getMaxRows();
+    if (maxRows >= 5) {
+      const range = inputSheet.getRange(5, 1, maxRows - 4, 1);
+      range.setDataValidation(
+        SpreadsheetApp.newDataValidation().requireCheckbox().build()
+      );
+      fixFalseText(range);
+    }
+  }
+
+  // 3. プロジェクトテンプレート
+  const templateSheet = ss.getSheetByName('プロジェクトテンプレート');
+  if (templateSheet) {
+    // C27 (不要なので削除)
+    templateSheet.getRange('C27').clearDataValidations();
+    // A27 (★追加)
+    templateSheet.getRange('A27').setDataValidation(
+      SpreadsheetApp.newDataValidation().requireCheckbox().build()
+    );
+    // A29以降
+    const maxRows = templateSheet.getMaxRows();
+    if (maxRows >= 29) {
+      const range = templateSheet.getRange(29, 1, maxRows - 28, 1);
+      range.setDataValidation(
+        SpreadsheetApp.newDataValidation().requireCheckbox().build()
+      );
+      fixFalseText(range);
+    }
+  }
+
+  // 4. 完了タスク
+  const doneSheet = ss.getSheetByName('完了タスク');
+  if (doneSheet) {
+    const maxRows = doneSheet.getMaxRows();
+    if (maxRows >= 2) {
+      const range = doneSheet.getRange(2, 1, maxRows - 1, 1);
+      range.setDataValidation(
+        SpreadsheetApp.newDataValidation().requireCheckbox().build()
+      );
+      fixFalseText(range);
+    }
+  }
+
+  // 5. タスク一覧 (★追加)
+  const listSheet = ss.getSheetByName('タスク一覧');
+  if (listSheet) {
+      // D1
+      listSheet.getRange('D1').setDataValidation(
+          SpreadsheetApp.newDataValidation().requireCheckbox().build()
+      );
+  }
+
+  // 6. カレンダー取込 (★追加)
+  const calSheet = ss.getSheetByName('カレンダー取込');
+  if (calSheet) {
+      // A3
+      calSheet.getRange('A3').setDataValidation(
+          SpreadsheetApp.newDataValidation().requireCheckbox().build()
+      );
+      // A5以降
+      const maxRows = calSheet.getMaxRows();
+      if (maxRows >= 5) {
+          const range = calSheet.getRange(5, 1, maxRows - 4, 1);
+          range.setDataValidation(
+            SpreadsheetApp.newDataValidation().requireCheckbox().build()
+          );
+          fixFalseText(range);
+      }
+  }
+
+  SpreadsheetApp.getUi().alert("修復完了：チェックボックスを正しい位置に作成しました。");
+}
+
+/**
+ * 範囲内の "FALSE" / "TRUE" という文字列を、本物のブール値(チェックボックス用)に変換する
+ */
+function fixFalseText(range) {
+  const values = range.getValues();
+  let changed = false;
+  
+  const newValues = values.map(row => row.map(cell => {
+    if (cell === 'FALSE') {
+      changed = true;
+      return false;
+    }
+    if (cell === 'TRUE') {
+      changed = true;
+      return true;
+    }
+    return cell;
+  }));
+
+  if (changed) {
+    range.setValues(newValues);
+  }
+}
