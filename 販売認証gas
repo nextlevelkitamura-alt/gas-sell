@@ -1,0 +1,110 @@
+// ==========================================
+// ★ 設定項目（ここだけ書き換えてください）
+// ==========================================
+
+// あなたが発行した最新のウェブアプリURL
+const AUTH_URL = "https://script.google.com/macros/s/AKfycbyT7jve6SrEX6WFA6rjNBJnJDZyoLldA3CHnTzzymiApEi2Sgr-W4siJjzBPuNYB6gMrA/exec";
+
+// ライブラリ名（ID追加時に設定した名前と一致させる）
+const LIB = TaskManager; 
+
+// ==========================================
+// 1. 認証チェック（7日間キャッシュ版）
+// ==========================================
+function isAuthorized() {
+  const userProperties = PropertiesService.getUserProperties();
+  const cachedStatus = userProperties.getProperty('AUTH_CACHE');
+  const lastChecked = userProperties.getProperty('AUTH_DATE');
+  const now = new Date().getTime();
+  const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000; 
+
+  if (cachedStatus === 'OK' && lastChecked && (now - lastChecked < ONE_WEEK_MS)) {
+    return true;
+  }
+
+  const userEmail = Session.getActiveUser().getEmail();
+  try {
+    const response = UrlFetchApp.fetch(AUTH_URL + "?email=" + userEmail);
+    if (response.getContentText() === "OK") {
+      userProperties.setProperty('AUTH_CACHE', 'OK');
+      userProperties.setProperty('AUTH_DATE', now.toString());
+      return true;
+    } else {
+      userProperties.deleteProperty('AUTH_CACHE');
+      userProperties.deleteProperty('AUTH_DATE');
+      return false;
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+function authError() {
+  Browser.msgBox("エラー: このアカウントは登録されていません。");
+}
+
+// ==========================================
+// 2. メニュー構築とイベントトリガー
+// ==========================================
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('📅 タスク連携')
+    .addItem('🔧 設定チェック (診断)', 'checkConfiguration')
+    .addSeparator()
+    .addItem('設定: 自動化トリガーをセット (更新時も実行)', 'setupTriggers')
+    .addSeparator()
+    .addItem('手動: プロジェクトシート作成', 'createProjectSheets')
+    .addItem('手動: カレンダー同期 (タスク入力 -> Cal)', 'syncTasksToCalendar')
+    .addItem('手動: カレンダー同期 (Cal -> シート)', 'syncFromCalendarToSheets')
+    .addItem('手動: 【統合】同期・転送・並び替え', 'executeTasksAction')
+    .addItem('手動: タスク一覧更新 (ダッシュボード)', 'updateDashboard')
+    .addSeparator()
+    .addItem('分析: レポート生成 (集計)', 'aggregateAndVisualize')
+    .addToUi();
+}
+
+// 編集時のトリガー（認証を通してからライブラリへ）
+function onEditTrigger(e) {
+  if (!isAuthorized()) return; 
+  LIB.onEditTrigger(e);
+}
+
+// ==========================================
+// 3. 機能呼び出し（ラッパー関数）
+// ==========================================
+
+// --- 設定・診断 ---
+function checkConfiguration() {
+  if (isAuthorized()) LIB.checkConfiguration(); else authError();
+}
+
+function setupTriggers() {
+  if (isAuthorized()) LIB.setupTriggers(); else authError();
+}
+
+// --- プロジェクト管理 ---
+function createProjectSheets() {
+  if (isAuthorized()) LIB.createProjectSheets(); else authError();
+}
+
+// --- カレンダー同期・タスク操作 ---
+function syncTasksToCalendar() {
+  if (isAuthorized()) LIB.syncTasksToCalendar(); else authError();
+}
+
+function syncFromCalendarToSheets() {
+  if (isAuthorized()) LIB.syncFromCalendarToSheets(); else authError();
+}
+
+function executeTasksAction() {
+  if (isAuthorized()) LIB.executeTasksAction(); else authError();
+}
+
+// --- ダッシュボード・分析 ---
+function updateDashboard() {
+  if (isAuthorized()) LIB.updateDashboard(); else authError();
+}
+
+function aggregateAndVisualize() {
+  if (isAuthorized()) LIB.aggregateAndVisualize(); else authError();
+}
