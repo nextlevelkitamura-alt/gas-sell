@@ -882,7 +882,6 @@ function updateDashboard() {
       leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.memo, t.taskId, t.originSheet, t.eventId]);
       greenRows.push(leftRows.length - 1);
     });
-    leftRows.push(emptyRow10);
   }
   leftRows.push(['', `■ 本日 (${formatDate(today)})`, '', '', '', '', '', '', '', '']);
   boldRows.push(leftRows.length - 1);
@@ -894,12 +893,10 @@ function updateDashboard() {
       pinkRows.push(leftRows.length - 1); 
     });
   }
-  leftRows.push(emptyRow10);
   leftRows.push(['', `■ 明日 (${formatDate(tomorrow)})`, '', '', '', '', '', '', '', '']);
   boldRows.push(leftRows.length - 1);
   if (tomorrowTasks.length === 0) leftRows.push(['', '(予定なし)', '', '', '', '', '', '', '', '']);
   else tomorrowTasks.forEach(t => leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.memo, t.taskId, t.originSheet, t.eventId]));
-  leftRows.push(emptyRow10);
   leftRows.push(['', `■ 明後日 (${formatDate(dayAfterTomorrow)})`, '', '', '', '', '', '', '', '']);
   boldRows.push(leftRows.length - 1);
   if (dayAfterTasks.length === 0) leftRows.push(['', '(予定なし)', '', '', '', '', '', '', '', '']);
