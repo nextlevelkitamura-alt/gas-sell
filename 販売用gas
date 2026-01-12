@@ -934,16 +934,17 @@ function updateDashboard() {
   const clearHeight = Math.max(currentMax - startRow + 1, maxLines); 
   
   if (clearHeight > 0) {
-    // Clear content of A and L for the whole range first (to avoid mixed states)
-    // But actually, we just inserted checkboxes. 
-    // We only need to clear "excess" rows below maxLines.
+    // Clear content cleanup
     if (clearHeight > maxLines) {
-       dashboardSheet.getRange(startRow + maxLines, 1, clearHeight - maxLines, 1).clearContent().removeCheckboxes();
-       dashboardSheet.getRange(startRow + maxLines, 12, clearHeight - maxLines, 1).clearContent().removeCheckboxes();
+       dashboardSheet.getRange(startRow + maxLines, 1, clearHeight - maxLines, 1).clearContent().removeCheckboxes().clearFormat();
+       dashboardSheet.getRange(startRow + maxLines, 12, clearHeight - maxLines, 1).clearContent().removeCheckboxes().clearFormat();
        dashboardSheet.getRange(startRow + maxLines, 2, clearHeight - maxLines, 10).clearContent().clearDataValidations().clearFormat();
        dashboardSheet.getRange(startRow + maxLines, 13, clearHeight - maxLines, 10).clearContent().clearDataValidations().clearFormat();
     }
-    // For the active range (maxLines), we overwrite with setValues, so no need to clear content explicitly except B-K, M-V columns
+    // For active range: Clear format of A and L to remove leftover backgrounds (essential for empty rows)
+    dashboardSheet.getRange(startRow, 1, maxLines, 1).clearFormat(); 
+    dashboardSheet.getRange(startRow, 12, maxLines, 1).clearFormat();
+
     dashboardSheet.getRange(startRow, 2, maxLines, 10).clearContent().clearDataValidations().clearFormat();
     dashboardSheet.getRange(startRow, 13, maxLines, 10).clearContent().clearDataValidations().clearFormat();
   }
@@ -956,7 +957,7 @@ function updateDashboard() {
   for (let i = 0; i < maxLines; i++) {
     const left = leftRows[i] || emptyRow10;
     const right = rightRows[i] || emptyRightWithCheck; 
-    finalValues.push([...left, '', ...right]); // Left(10) + K(1) + Right(11) = 22
+    finalValues.push([...left, '', ...right]); 
   }
 
   if (finalValues.length > 0) {
@@ -1010,16 +1011,16 @@ function updateDashboard() {
 
     dashboardSheet.clearConditionalFormatRules();
 
-    // 背景色設定: A列(チェックボックス)は塗らず、B列以降を塗る
-    if (greenRows.length) dashboardSheet.getRangeList(greenRows.map(i => `B${startRow+i}:G${startRow+i}`)).setBackground('#F0F8F0');
-    if (pinkRows.length) dashboardSheet.getRangeList(pinkRows.map(i => `B${startRow+i}:G${startRow+i}`)).setBackground('#FFE0E0');
+    // 背景色設定: A列も含めて塗る (ただし空行などはboldRowsにもgreen/pinkにも含まれないので塗られない)
+    if (greenRows.length) dashboardSheet.getRangeList(greenRows.map(i => `A${startRow+i}:G${startRow+i}`)).setBackground('#F0F8F0');
+    if (pinkRows.length) dashboardSheet.getRangeList(pinkRows.map(i => `A${startRow+i}:G${startRow+i}`)).setBackground('#FFE0E0');
     if (boldRows.length) {
       const ranges = dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}:G${startRow+i}`));
       ranges.setFontWeight('bold').setBackground('#EEEEEE');
-      // 見出し行のチェックボックス削除(念のため)
+      // 見出し行のチェックボックス削除
       dashboardSheet.getRangeList(boldRows.map(i => `A${startRow+i}`)).removeCheckboxes();
     }
-    // 右側見出し(L3)のチェックボックス削除 & スタイル適用 (完了(L)〜メモ(R)まで背景色)
+    // 右側見出し(L3)のチェックボックス削除 & スタイル適用
     dashboardSheet.getRange(startRow, 12).removeCheckboxes();
     dashboardSheet.getRange(startRow, 12, 1, 7).setFontWeight('bold').setBackground('#EEEEEE'); // L-R
 
