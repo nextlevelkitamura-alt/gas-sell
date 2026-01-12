@@ -876,7 +876,7 @@ function updateDashboard() {
   const emptyRow10 = new Array(10).fill(''); 
 
   if (expiredTasks.length > 0) {
-    leftRows.push([false, '⚠ 期限切れ・未完了', '', '', '', '', '', '', '', '']); 
+    leftRows.push(['', '⚠ 期限切れ・未完了', '', '', '', '', '', '', '', '']); 
     boldRows.push(leftRows.length - 1);
     expiredTasks.forEach(t => {
       leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.memo, t.taskId, t.originSheet, t.eventId]);
@@ -884,10 +884,10 @@ function updateDashboard() {
     });
     leftRows.push(emptyRow10);
   }
-  leftRows.push([false, `■ 本日 (${formatDate(today)})`, '', '', '', '', '', '', '', '']);
+  leftRows.push(['', `■ 本日 (${formatDate(today)})`, '', '', '', '', '', '', '', '']);
   boldRows.push(leftRows.length - 1);
   if (todayTasks.length === 0) {
-    leftRows.push([false, '(予定なし)', '', '', '', '', '', '', '', '']);
+    leftRows.push(['', '(予定なし)', '', '', '', '', '', '', '', '']);
   } else {
     todayTasks.forEach(t => {
       leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.memo, t.taskId, t.originSheet, t.eventId]);
@@ -895,19 +895,19 @@ function updateDashboard() {
     });
   }
   leftRows.push(emptyRow10);
-  leftRows.push([false, `■ 明日 (${formatDate(tomorrow)})`, '', '', '', '', '', '', '', '']);
+  leftRows.push(['', `■ 明日 (${formatDate(tomorrow)})`, '', '', '', '', '', '', '', '']);
   boldRows.push(leftRows.length - 1);
-  if (tomorrowTasks.length === 0) leftRows.push([false, '(予定なし)', '', '', '', '', '', '', '', '']);
+  if (tomorrowTasks.length === 0) leftRows.push(['', '(予定なし)', '', '', '', '', '', '', '', '']);
   else tomorrowTasks.forEach(t => leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.memo, t.taskId, t.originSheet, t.eventId]));
   leftRows.push(emptyRow10);
-  leftRows.push([false, `■ 明後日 (${formatDate(dayAfterTomorrow)})`, '', '', '', '', '', '', '', '']);
+  leftRows.push(['', `■ 明後日 (${formatDate(dayAfterTomorrow)})`, '', '', '', '', '', '', '', '']);
   boldRows.push(leftRows.length - 1);
-  if (dayAfterTasks.length === 0) leftRows.push([false, '(予定なし)', '', '', '', '', '', '', '', '']);
+  if (dayAfterTasks.length === 0) leftRows.push(['', '(予定なし)', '', '', '', '', '', '', '', '']);
   else dayAfterTasks.forEach(t => leftRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.memo, t.taskId, t.originSheet, t.eventId]));
 
   // 右側: [Check, Proj, Task, Start, Dur, Prio, MEMO, Cal, TID, Origin, EID] -> 11 cols
   let rightRows = [];
-  rightRows.push([false, '【未設定タスク】', '', '', '', '', '', '', '', '', '']);
+  rightRows.push(['', '【未設定タスク】', '', '', '', '', '', '', '', '', '']);
   unscheduledTasks.forEach(t => {
     rightRows.push([false, t.projectName, t.taskName, t.startTime, t.duration, t.priority, t.memo, t.calType, t.taskId, t.originSheet, t.eventId]);
   });
